@@ -1,5 +1,11 @@
-FROM mcr.microsoft.com/windows/servercore:1809
+FROM docker.io/golang:1.21-windowsservercore-ltsc2022 AS go-builder
+WORKDIR /output-parser
+COPY ./analyzer-output-parser/go.mod go.mod
+COPY ./analyzer-output-parser/go.sum go.sum
+COPY ./analyzer-output-parser/main.go main.go
+RUN go build -o js-bundle-generator ./main.go
 
+FROM mcr.microsoft.com/windows/servercore:ltsc2022 AS builder
 SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
 
 # PATH isn't actually set in the Docker image, so we have to set it from within the container
@@ -32,7 +38,7 @@ RUN $url = ('https://nodejs.org/dist/v{0}/node-v{0}-win-x64.zip' -f $env:NODE_VE
 	Write-Host 'Verifying ("npm --version") ...'; \
 	npm --version; \
 	\
-	Write-Host 'Complete.'
+	Write-Host 'Complete.';
 
 ENV YARN_VERSION 1.22.17
 
@@ -43,6 +49,32 @@ RUN Write-Host 'Installing "yarn" ...'; \
 	Write-Host 'Verifying ("yarn --version") ...'; \
 	yarn --version; \
 	\
-	Write-Host 'Complete.'
+	Write-Host 'Complete.';
 
-CMD [ "node" ]
+ARG VERSION=main
+ENV VERSION=$VERSION
+COPY . /opt/app-root/src/build
+ENV CI=true
+ENV PUBLIC_URL=.
+RUN Write-Host 'Build static-report ...'; \
+  \
+  cd c:\opt\app-root\src\build; \
+  (Get-Content ./public/version.js) -replace \"_VERSION_\", $VERSION -replace \"main\", \"latest\" | Set-Content ./public/version.js; \
+  npm clean-install; \
+  npm run build; \
+  \
+  Write-Host 'Complete.';
+
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+COPY --from=go-builder /output-parser/js-bundle-generator /usr/bin/js-bundle-generator
+COPY --from=builder /opt/app-root/src/build /usr/local/static-report
+
+LABEL name="konveyor/static-report" \
+      description="Konveyor Analysis - Static Report" \
+      help="For more information visit https://konveyor.io" \
+      license="Apache License 2.0" \
+      summary="Static report for Konveyor analysis modules" \
+      url="https://quay.io/konveyor/static-report"
+
+ENTRYPOINT ["/usr/bin/js-bundle-generator"]
+
