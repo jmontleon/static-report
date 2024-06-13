@@ -1,0 +1,19 @@
+name: 'Build Windows Image'
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'main'
+      - 'release-*'
+    tags:
+      - 'v*'
+
+jobs:
+  image-build:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@main
+    - name: Build static-report
+      run: |
+        docker build -f ./Dockerfile.windows -t quay.io/konveyorstatic-report:latest .
